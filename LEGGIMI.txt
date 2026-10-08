@@ -1,0 +1,54 @@
+GESTIONALE PT - come metterlo sul telefono
+===========================================
+
+Cosa contiene questa cartella
+- index.html, app.js, style.css: l'app
+- manifest.webmanifest, sw.js, icons/: servono a farla installare come app e usare senza internet
+
+Cosa fa l'app
+- Oggi: pagamenti da incassare del mese (spunta quando arrivano), arretrati e abbonamenti da rinnovare.
+- Clienti: scheda con contatti, obiettivo, note; abbonamento con data di inizio, data di fine, rata e spunte mensili;
+  anamnesi (si salva da sola, con consenso privacy); diario delle sedute.
+- Dati: backup in un file, ripristino da backup, cancellazione.
+
+IMPORTANTE: i dati restano solo sul telefono dove usi l'app. Non c'e' un server.
+Fai un backup ogni tanto (Dati > Scarica backup) e tienilo su Drive, iCloud o via email.
+Se cambi telefono o cancelli i dati del browser, senza backup li perdi.
+
+
+PASSO 1 - Metti la cartella online (gratis)
+-------------------------------------------
+Per installarla come app serve un indirizzo web (https). Il modo piu' semplice e' GitHub Pages:
+
+1. Crea un account su github.com (gratuito).
+2. Crea un nuovo repository, per esempio "pt-clienti", e lascialo pubblico.
+   Nel repository ci sono solo i file dell'app, mai i dati dei clienti: quelli restano sul telefono.
+3. Carica tutti i file di questa cartella (index.html, app.js, style.css, manifest.webmanifest, sw.js e la cartella icons).
+   Dal sito: "Add file" > "Upload files", trascina i file e conferma con "Commit changes".
+4. Nel repository vai su Settings > Pages. In "Build and deployment" scegli "Deploy from a branch",
+   branch "main", cartella "/ (root)", e salva.
+5. Dopo uno o due minuti l'app e' online all'indirizzo https://IL-TUO-NOME.github.io/pt-clienti/
+
+Alternativa: Cloudflare Pages permette di caricare la cartella direttamente, senza passare da GitHub.
+
+
+PASSO 2 - Installala sul telefono
+---------------------------------
+iPhone: apri l'indirizzo in Safari, tocca Condividi e scegli "Aggiungi alla schermata Home".
+Android: apri l'indirizzo in Chrome, menu (tre puntini) e scegli "Installa app" o "Aggiungi a schermata Home".
+
+Alla prima apertura serve internet. Dopo, funziona anche senza.
+Se usi anche il computer, i dati del computer e quelli del telefono sono separati: per spostarli usa Backup e Ripristino.
+
+
+Quando modifichi l'app
+----------------------
+Se cambi dei file, apri sw.js e aumenta il numero della versione (per esempio 'ptapp-v1' diventa 'ptapp-v2'),
+altrimenti i telefoni continuano a mostrare la vecchia versione.
+
+
+Privacy
+-------
+L'anamnesi contiene dati sulla salute dei clienti. Questi dati sono personali e delicati: tienili solo se servono,
+informa i clienti e fai firmare l'informativa privacy. L'app ha una casella per segnare che il consenso c'e'.
+Blocca il telefono con codice o impronta, perche' chi lo sblocca vede tutti i clienti.
