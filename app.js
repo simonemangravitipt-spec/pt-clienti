@@ -11,11 +11,12 @@
       if (raw) {
         var d = JSON.parse(raw);
         d.clients = Array.isArray(d.clients) ? d.clients : [];
+        d.events = Array.isArray(d.events) ? d.events : [];
         d.meta = d.meta || {};
         return d;
       }
     } catch (e) { storageOk = false; }
-    return { clients: [], meta: {} };
+    return { clients: [], meta: {}, events: [] };
   }
   var db = load();
 
@@ -107,7 +108,7 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 3200);
   }
   function route() {
-    var h = (location.hash || '').replace(/^#/, '') || 'oggi';
+    var h = (location.hash || '').replace(/^#/, '') || 'calendario';
     var p = h.split('/');
     return { name: p[0], id: p[1], sub: p[2] };
   }
@@ -184,7 +185,7 @@
     var pct = expected ? Math.round(got / expected * 100) : 0;
     var late = lateItems(), renew = renewItems();
 
-    var h = '<header class="top"><h1>Oggi</h1><div class="monthnav" role="group" aria-label="Mese visualizzato">' +
+    var h = '<header class="top"><h1>Incassi</h1><div class="monthnav" role="group" aria-label="Mese visualizzato">' +
       '<button type="button" data-act="mprev" aria-label="Mese precedente">‹</button><button type="button" class="lblbtn" data-act="caltoggle" aria-expanded="' + S.cal + '" aria-controls="curtain">' + lab(vym) + ' <span class="car" aria-hidden="true">' + (S.cal ? '▴' : '▾') + '</span></button>' +
       '<button type="button" data-act="mnext" aria-label="Mese successivo">›</button></div></header>';
     if (S.cal) { h += calendarHtml(vym); S.calAnim = false; }
@@ -365,6 +366,8 @@
   /* ================= Disegno ================= */
   function render(top) {
     var r = route(); var y = top ? 0 : window.scrollY;
+    if (r.name === 'calendario' && window.PTCal && window.PTCal.before) window.PTCal.before();
+    document.body.classList.toggle('calmode', r.name === 'calendario');
     var tabs = document.querySelectorAll('.tabbar a');
     var active = r.name === 'cliente' ? 'clienti' : r.name;
     for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab') === active);
@@ -372,10 +375,12 @@
     if (r.name === 'clienti') html = vClienti();
     else if (r.name === 'cliente') html = vCliente(r);
     else if (r.name === 'impostazioni') html = vImpost();
-    else html = vOggi();
+    else if (r.name === 'oggi') html = vOggi();
+    else html = window.PTCal ? window.PTCal.view() : '';
     viewEl.innerHTML = html;
     updPlanPreview();
     window.scrollTo(0, y);
+    if (r.name === 'calendario' && window.PTCal) window.PTCal.after(); else document.body.classList.remove('noscroll');
   }
   function updPlanPreview() {
     var f = viewEl.querySelector('form[data-form="plan"]'); var box = document.getElementById('planpreview');
@@ -412,7 +417,19 @@
       c.anamnesi = c.anamnesi || {}; c.diario = Array.isArray(c.diario) ? c.diario : [];
       return c;
     });
-    return { clients: clients, meta: obj.meta || {} };
+    var tm = /^\d{2}:\d{2}$/;
+    var events = (Array.isArray(obj.events) ? obj.events : []).filter(function (ev) { return ev && re.test(ev.date || ''); }).map(function (ev) {
+      var r = ev.rep && typeof ev.rep === 'object' ? ev.rep : {};
+      ev.id = ev.id || uid(); ev.type = ev.type === 'rem' ? 'rem' : 'app'; ev.title = String(ev.title || ''); ev.clientId = ev.clientId || '';
+      ev.allDay = !!ev.allDay; ev.start = tm.test(ev.start || '') ? ev.start : (ev.allDay ? '' : '09:00'); ev.end = tm.test(ev.end || '') ? ev.end : '';
+      ev.rep = { freq: ['daily', 'weekly', 'monthly', 'yearly'].indexOf(r.freq) >= 0 ? r.freq : 'none', interval: Math.max(1, Math.min(30, Number(r.interval) || 1)), days: (Array.isArray(r.days) ? r.days : []).filter(function (n) { return n >= 0 && n <= 6; }), until: re.test(r.until || '') ? r.until : '' };
+      ev.reminders = (Array.isArray(ev.reminders) ? ev.reminders : []).map(Number).filter(function (n) { return n >= 0; });
+      ev.ex = (Array.isArray(ev.ex) ? ev.ex : []).filter(function (x) { return re.test(x); });
+      ev.doneDates = (Array.isArray(ev.doneDates) ? ev.doneDates : []).filter(function (x) { return re.test(x); });
+      ev.location = String(ev.location || ''); ev.notes = String(ev.notes || ''); ev.color = /^#[0-9A-Fa-f]{6}$/.test(ev.color || '') ? ev.color : '#D94F00';
+      return ev;
+    });
+    return { clients: clients, meta: obj.meta || {}, events: events };
   }
 
   document.addEventListener('click', function (e) {
@@ -443,7 +460,7 @@
     }
     else if (act === 'newclient') { S.form = { type: 'client', id: null }; render(); }
     else if (act === 'editclient') { S.form = { type: 'client', id: cid }; render(); }
-    else if (act === 'delclient') { db.clients = db.clients.filter(function (x) { return x.id !== cid; }); save(); location.hash = '#clienti'; render(); toast('Cliente eliminato'); }
+    else if (act === 'delclient') { db.clients = db.clients.filter(function (x) { return x.id !== cid; }); db.events.forEach(function (ev) { if (ev.clientId === cid) ev.clientId = ''; }); save(); location.hash = '#clienti'; render(); toast('Cliente eliminato'); }
     else if (act === 'newplan') {
       var pl = plansOf(c), last = pl[pl.length - 1], d = {};
       if (last) { d.months = last.months; d.amount = last.amount; var s2 = addDaysISO(planEnd(last), 1); d.startDate = s2 < todayISO() ? todayISO() : s2; }
@@ -457,7 +474,7 @@
     else if (act === 'copybackup') copyBackup();
     else if (act === 'importok') { db = S.importData; S.importData = null; save(); render(); toast('Dati ripristinati'); }
     else if (act === 'importno') { S.importData = null; render(); }
-    else if (act === 'wipe') { db = { clients: [], meta: {} }; save(); render(); toast('Tutti i dati sono stati cancellati'); }
+    else if (act === 'wipe') { db = { clients: [], meta: {}, events: [] }; save(); render(); toast('Tutti i dati sono stati cancellati'); }
   });
 
   document.addEventListener('submit', function (e) {
@@ -528,5 +545,10 @@
   // Se l'app resta aperta oltre la mezzanotte, ridisegna quando torni sulla pagina
   document.addEventListener('visibilitychange', function () { if (!document.hidden && !S.form) render(); });
 
+  window.PT = {
+    db: function () { return db; }, save: save, render: function () { render(); }, toast: toast,
+    pd: pd, pad: pad, esc: esc, todayISO: todayISO, addDaysISO: addDaysISO, fmtD: fmtD, addM: addM, daysIn: daysIn, MESI: MESI,
+    getClient: getClient, getPlan: getPlan, isPaid: isPaid, payRow: payRow, monthPays: monthPays, dueISO: dueISO
+  };
   render();
 })();
