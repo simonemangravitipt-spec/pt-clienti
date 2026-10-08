@@ -11,12 +11,12 @@
       if (raw) {
         var d = JSON.parse(raw);
         d.clients = Array.isArray(d.clients) ? d.clients : [];
-        d.events = Array.isArray(d.events) ? d.events : [];
+        delete d.events;
         d.meta = d.meta || {};
         return d;
       }
     } catch (e) { storageOk = false; }
-    return { clients: [], meta: {}, events: [] };
+    return { clients: [], meta: {} };
   }
   var db = load();
 
@@ -62,14 +62,15 @@
   function getClient(id) { return db.clients.filter(function (c) { return c.id === id; })[0]; }
   function getPlan(c, id) { return (c.plans || []).filter(function (p) { return p.id === id; })[0]; }
 
+  // Rate non pagate la cui scadenza è già passata (insoluti)
   function lateItems() {
-    var out = [], now = curYM();
+    var out = [];
     db.clients.forEach(function (c) {
       plansOf(c).forEach(function (p) {
-        sched(p).forEach(function (ym) { if (ym < now && !isPaid(p, ym)) out.push({ c: c, p: p, ym: ym }); });
+        sched(p).forEach(function (ym) { if (isLate(p, ym)) out.push({ c: c, p: p, ym: ym, due: dueISO(p, ym), paid: false }); });
       });
     });
-    out.sort(function (a, b) { return a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : a.c.name.localeCompare(b.c.name); });
+    out.sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : a.c.name.localeCompare(b.c.name); });
     return out;
   }
   // Clienti il cui ultimo abbonamento sta per finire o è finito, senza un abbonamento successivo
@@ -88,8 +89,8 @@
     var ps = plansOf(c);
     if (!ps.length) return { t: 'Senza abbonamento', cls: '' };
     var late = 0;
-    ps.forEach(function (p) { sched(p).forEach(function (ym) { if (ym < curYM() && !isPaid(p, ym)) late++; }); });
-    if (late) return { t: late === 1 ? '1 mese arretrato' : late + ' mesi arretrati', cls: 'late' };
+    ps.forEach(function (p) { sched(p).forEach(function (ym) { if (isLate(p, ym)) late++; }); });
+    if (late) return { t: late === 1 ? '1 rata scaduta' : late + ' rate scadute', cls: 'late' };
     var lp = ps[ps.length - 1]; var s = sched(lp); var last = s[s.length - 1];
     if (planEnd(lp) < todayISO()) return { t: 'Da rinnovare', cls: 'warn' };
     if (last === curYM() || last === addM(curYM(), 1)) return { t: 'In scadenza', cls: 'warn' };
@@ -98,7 +99,7 @@
   }
 
   /* ================= Stato dell'interfaccia ================= */
-  var S = { viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false, cal: false, calSel: null, calAnim: false };
+  var S = { viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false };
   var CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var viewEl = document.getElementById('view');
   var toastTimer = null;
@@ -113,82 +114,49 @@
     return { name: p[0], id: p[1], sub: p[2] };
   }
 
-  /* ================= Schermata: Oggi ================= */
-  function payRow(x, showMonth) {
-    var idx = sched(x.p).indexOf(x.ym) + 1; var paid = isPaid(x.p, x.ym);
-    return '<li class="row' + (paid ? ' paid' : '') + (showMonth && !paid ? ' overdue' : '') + '">' +
-      '<button type="button" class="chk" data-act="pay" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-pressed="' + paid + '" aria-label="Pagato: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' + CHECK + '</button>' +
-      '<div class="who"><b><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'rata ' + idx + ' di ' + x.p.months + '</span></div>' +
-      '<span class="amt num">' + eur(x.p.amount) + '</span></li>';
-  }
-
-
-  /* ================= Calendario dei pagamenti (la "tenda" sotto il mese) ================= */
-  var GIORNI = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+  /* ================= Scadenze delle rate ================= */
   function daysIn(ym) { var p = ym.split('-').map(Number); return new Date(p[0], p[1], 0).getDate(); }
-  // Giorno di scadenza della rata = giorno di inizio dell'abbonamento (ridotto se il mese è più corto)
-  function dueISO(p, ym) { var d = Math.min(pd(p.startDate).d, daysIn(ym)); return ym + '-' + pad(d); }
+  // Scadenza della rata del mese ym: il giorno scelto per l'abbonamento (o il giorno di inizio),
+  // ridotto se il mese è più corto. Nel primo mese non può essere prima dell'inizio.
+  function dueISO(p, ym) {
+    var day = Number(p.dueDay) >= 1 ? Math.min(31, Number(p.dueDay)) : pd(p.startDate).d;
+    var iso = ym + '-' + pad(Math.min(day, daysIn(ym)));
+    if (ym === p.startDate.slice(0, 7) && iso < p.startDate) iso = p.startDate;
+    return iso;
+  }
+  function isLate(p, ym) { return !isPaid(p, ym) && dueISO(p, ym) < todayISO(); }
+  // 'ok' = incassato, 'late' = insoluto (scadenza passata), 'pend' = da incassare
+  function payState(p, ym) { return isPaid(p, ym) ? 'ok' : (isLate(p, ym) ? 'late' : 'pend'); }
+  var STLAB = { ok: 'incassato', late: 'insoluto', pend: 'da incassare' };
   function monthPays(ym) {
     var out = [];
     db.clients.forEach(function (c) { plansOf(c).forEach(function (p) { if (sched(p).indexOf(ym) >= 0) out.push({ c: c, p: p, ym: ym, due: dueISO(p, ym), paid: isPaid(p, ym) }); }); });
     out.sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : a.c.name.localeCompare(b.c.name); });
     return out;
   }
-  function dayState(list, iso) {
-    var t = todayISO(), unpaid = list.filter(function (x) { return !x.paid; });
-    if (!unpaid.length) return 'ok';
-    return iso < t ? 'late' : 'pend';
-  }
-  function calendarHtml(ym) {
-    var pays = monthPays(ym), by = {}, t = todayISO();
-    pays.forEach(function (x) { (by[x.due] = by[x.due] || []).push(x); });
-    var tot = 0, got = 0, lateAmt = 0, lateN = 0, nextAmt = 0;
-    pays.forEach(function (x) {
-      tot += x.p.amount;
-      if (x.paid) got += x.p.amount; else if (x.due < t) { lateAmt += x.p.amount; lateN++; } else nextAmt += x.p.amount;
-    });
-    var p0 = ym.split('-').map(Number); var first = new Date(p0[0], p0[1] - 1, 1); var off = (first.getDay() + 6) % 7; var n = daysIn(ym);
-    var h = '<div class="curtain' + (S.calAnim ? ' anim' : '') + '" id="curtain" role="region" aria-label="Calendario pagamenti di ' + lab(ym) + '">';
-    h += '<div class="calsum"><div><span class="lab">Incassato</span><b class="num ok">' + eur(got) + '</b></div>' +
-      '<div><span class="lab">Insoluti</span><b class="num ' + (lateAmt ? 'bad' : '') + '">' + eur(lateAmt) + '</b><small class="muted">' + lateN + (lateN === 1 ? ' rata' : ' rate') + '</small></div>' +
-      '<div><span class="lab">Ancora in arrivo</span><b class="num">' + eur(nextAmt) + '</b></div></div>';
-    h += '<div class="calgrid" role="grid">' + GIORNI.map(function (g) { return '<span class="dow" aria-hidden="true">' + g + '</span>'; }).join('');
-    for (var i = 0; i < off; i++) h += '<span class="day blank"></span>';
-    for (var d = 1; d <= n; d++) {
-      var iso = ym + '-' + pad(d), list = by[iso];
-      if (!list) { h += '<span class="day none' + (iso === t ? ' today' : '') + '">' + d + '</span>'; continue; }
-      var st = dayState(list, iso);
-      var names = list.map(function (x) { return x.c.name; }).join(', ');
-      var txt = st === 'ok' ? 'pagato' : st === 'late' ? 'insoluto' : 'da pagare';
-      h += '<button type="button" class="day ' + st + (iso === t ? ' today' : '') + (S.calSel === iso ? ' sel' : '') + '" data-act="calday" data-d="' + iso + '" aria-pressed="' + (S.calSel === iso) + '" aria-label="' + d + ' ' + lab(ym) + ': ' + esc(names) + ', ' + txt + '">' + d + (list.length > 1 ? '<i>' + list.length + '</i>' : '') + '</button>';
-    }
-    h += '</div>';
-    h += '<div class="legend small"><span><i class="sw ok"></i>Pagato</span><span><i class="sw late"></i>Insoluto</span><span><i class="sw pend"></i>Da pagare</span></div>';
-    if (S.calSel && by[S.calSel]) {
-      h += '<div class="selday"><div class="sechead"><h2>' + fmtD(S.calSel) + '</h2><span class="muted small">Tocca il quadrato per segnare il pagamento</span></div><ul class="rows">' +
-        by[S.calSel].map(function (x) { return payRow(x, false); }).join('') + '</ul></div>';
-    } else if (!pays.length) {
-      h += '<p class="muted small calhint">Nessun pagamento previsto a ' + lab(ym) + '.</p>';
-    } else {
-      h += '<p class="muted small calhint">Tocca un giorno colorato per vedere chi deve pagare.</p>';
-    }
-    return h + '</div>';
+
+  /* ================= Schermata: Incassi ================= */
+  function payRow(x, showMonth) {
+    var idx = sched(x.p).indexOf(x.ym) + 1, paid = isPaid(x.p, x.ym), st = payState(x.p, x.ym), due = fmtD(dueISO(x.p, x.ym)).slice(0, 5);
+    return '<li class="row' + (paid ? ' paid' : '') + (st === 'late' ? ' overdue' : '') + '">' +
+      '<button type="button" class="chk" data-act="pay" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-pressed="' + paid + '" aria-label="Pagato: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' + CHECK + '</button>' +
+      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span></div>' +
+      '<span class="amt num">' + eur(x.p.amount) + '</span></li>';
   }
 
   function vOggi() {
-    var vym = S.viewYM || curYM();
-    var rows = [];
-    db.clients.forEach(function (c) { plansOf(c).forEach(function (p) { if (sched(p).indexOf(vym) >= 0) rows.push({ c: c, p: p, ym: vym }); }); });
-    rows.sort(function (a, b) { var pa = isPaid(a.p, vym), pb = isPaid(b.p, vym); return pa === pb ? a.c.name.localeCompare(b.c.name) : pa ? 1 : -1; });
+    var vym = S.viewYM || curYM(), t = todayISO();
+    var rows = monthPays(vym);
     var expected = 0, got = 0, missing = 0;
-    rows.forEach(function (x) { expected += x.p.amount; if (isPaid(x.p, vym)) got += x.p.amount; else missing++; });
+    rows.forEach(function (x) { expected += x.p.amount; if (x.paid) got += x.p.amount; else missing++; });
     var pct = expected ? Math.round(got / expected * 100) : 0;
     var late = lateItems(), renew = renewItems();
+    var todo = rows.filter(function (x) { return !x.paid && x.due >= t; });
+    var done = rows.filter(function (x) { return x.paid; });
 
     var h = '<header class="top"><h1>Incassi</h1><div class="monthnav" role="group" aria-label="Mese visualizzato">' +
-      '<button type="button" data-act="mprev" aria-label="Mese precedente">‹</button><button type="button" class="lblbtn" data-act="caltoggle" aria-expanded="' + S.cal + '" aria-controls="curtain">' + lab(vym) + ' <span class="car" aria-hidden="true">' + (S.cal ? '▴' : '▾') + '</span></button>' +
+      '<button type="button" data-act="mprev" aria-label="Mese precedente">‹</button><span class="lbl">' + lab(vym) + '</span>' +
       '<button type="button" data-act="mnext" aria-label="Mese successivo">›</button></div></header>';
-    if (S.cal) { h += calendarHtml(vym); S.calAnim = false; }
     if (vym !== curYM()) h += '<div><button type="button" class="btn sm" data-act="mnow">Torna a ' + lab(curYM()) + '</button></div>';
 
     if (db.clients.length && (!db.meta.lastBackup || daysSince(db.meta.lastBackup) > 30)) {
@@ -201,15 +169,21 @@
       '<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div></div>';
 
     if (late.length) {
-      h += '<section class="late"><div class="sechead"><h2>Arretrati</h2><span class="muted small">Mesi passati non ancora pagati</span></div><ul class="rows">' +
+      h += '<section class="late"><div class="sechead"><h2><i class="pdot late"></i> Insoluti</h2><span class="muted small">Scadenza passata, non ancora pagati</span></div><ul class="rows">' +
         late.map(function (x) { return payRow(x, true); }).join('') + '</ul></section>';
     }
 
-    h += '<section><div class="sechead"><h2>Da incassare a ' + lab(vym) + '</h2><span class="muted small">Tocca il quadrato quando arriva il pagamento</span></div><ul class="rows">';
+    h += '<section><div class="sechead"><h2><i class="pdot pend"></i> Da incassare a ' + lab(vym) + '</h2><span class="muted small">Tocca il quadrato quando arriva il pagamento</span></div><ul class="rows">';
     if (!db.clients.length) h += '<li class="empty">Nessun cliente ancora. Vai su <a href="#clienti">Clienti</a> per aggiungere il primo.</li>';
     else if (!rows.length) h += '<li class="empty">Nessun pagamento previsto a ' + lab(vym) + '.</li>';
-    else h += rows.map(function (x) { return payRow(x, false); }).join('');
+    else if (!todo.length) h += '<li class="empty">Niente da incassare con scadenza ancora da venire.</li>';
+    else h += todo.map(function (x) { return payRow(x, false); }).join('');
     h += '</ul></section>';
+
+    if (done.length) {
+      h += '<section><div class="sechead"><h2><i class="pdot ok"></i> Incassati a ' + lab(vym) + '</h2><span class="muted small">Tocca di nuovo per togliere la spunta</span></div><ul class="rows">' +
+        done.map(function (x) { return payRow(x, false); }).join('') + '</ul></section>';
+    }
 
     if (renew.length) {
       h += '<section><div class="sechead"><h2>Da rinnovare</h2><span class="muted small">Abbonamenti in scadenza o finiti</span></div><ul class="rows">' +
@@ -258,18 +232,19 @@
     return '<form class="f" data-form="plan">' +
       '<label class="l">Mesi di percorso<input type="number" name="months" min="1" max="36" step="1" required inputmode="numeric" value="' + esc(d.months) + '"></label>' +
       '<label class="l">Rata mensile (€)<input type="number" name="amount" min="0" step="5" required inputmode="decimal" value="' + esc(d.amount) + '"></label>' +
-      '<label class="l full">Data di inizio<input type="date" name="startDate" required value="' + esc(d.startDate || todayISO()) + '"></label>' +
+      '<label class="l">Data di inizio<input type="date" name="startDate" required value="' + esc(d.startDate || todayISO()) + '"></label>' +
+      '<label class="l">Scade il giorno (facoltativo)<input type="number" name="dueDay" min="1" max="31" step="1" inputmode="numeric" placeholder="come l\'inizio" value="' + esc(d.dueDay) + '"></label>' +
       '<div class="full muted small" id="planpreview"></div>' +
       '<div class="full formbtns"><button type="submit" class="btn primary">' + (p ? 'Salva modifiche' : 'Salva abbonamento') + '</button><button type="button" class="btn" data-act="cancelform">Annulla</button></div></form>';
   }
   function planCard(c, p) {
     var s = sched(p), n = paidCount(p), arm = S.armed === 'delplan:' + p.id;
     var chips = s.map(function (ym) {
-      var cls = 'chip'; if (isPaid(p, ym)) cls += ' paid'; else if (ym < curYM()) cls += ' late'; if (ym === curYM()) cls += ' now';
-      return '<button type="button" class="' + cls + '" data-act="pay" data-c="' + c.id + '" data-p="' + p.id + '" data-ym="' + ym + '" aria-pressed="' + isPaid(p, ym) + '" aria-label="' + lab(ym) + ': ' + (isPaid(p, ym) ? 'pagato' : 'da pagare') + '">' + labShort(ym) + '</button>';
+      var cls = 'chip'; if (isPaid(p, ym)) cls += ' paid'; else if (isLate(p, ym)) cls += ' late'; if (ym === curYM()) cls += ' now';
+      return '<button type="button" class="' + cls + '" data-act="pay" data-c="' + c.id + '" data-p="' + p.id + '" data-ym="' + ym + '" aria-pressed="' + isPaid(p, ym) + '" aria-label="' + lab(ym) + ': ' + STLAB[payState(p, ym)] + '">' + labShort(ym) + '</button>';
     }).join('');
     return '<article class="card"><div class="head"><div><b class="num">' + eur(p.amount) + ' × ' + p.months + ' mesi = ' + eur(p.amount * p.months) + '</b>' +
-      '<div class="muted small num">Dal ' + fmtD(p.startDate) + ' al ' + fmtD(planEnd(p)) + '</div></div>' +
+      '<div class="muted small num">Dal ' + fmtD(p.startDate) + ' al ' + fmtD(planEnd(p)) + '</div><div class="muted small">Rata in scadenza il giorno ' + (Number(p.dueDay) >= 1 ? p.dueDay : pd(p.startDate).d) + ' di ogni mese</div></div>' +
       (n === p.months ? '<span class="badge ok">Saldato</span>' : '') + '</div>' +
       '<div class="muted small">Pagati ' + n + ' di ' + p.months + ' · incassato ' + eur(n * p.amount) + '</div><div class="chips">' + chips + '</div>' +
       '<div class="actions"><button type="button" class="btn sm" data-act="editplan" data-c="' + c.id + '" data-p="' + p.id + '">Modifica</button>' +
@@ -413,23 +388,11 @@
     var clients = obj.clients.filter(function (c) { return c && typeof c.name === 'string' && c.name; }).map(function (c) {
       c.id = c.id || uid();
       c.plans = (Array.isArray(c.plans) ? c.plans : []).filter(function (p) { return p && re.test(p.startDate || '') && Number(p.months) > 0; })
-        .map(function (p) { p.id = p.id || uid(); p.months = Number(p.months); p.amount = Number(p.amount) || 0; p.paid = p.paid || {}; return p; });
+        .map(function (p) { p.id = p.id || uid(); p.months = Number(p.months); p.amount = Number(p.amount) || 0; p.paid = p.paid || {}; p.dueDay = Number(p.dueDay) >= 1 && Number(p.dueDay) <= 31 ? Math.round(Number(p.dueDay)) : ''; return p; });
       c.anamnesi = c.anamnesi || {}; c.diario = Array.isArray(c.diario) ? c.diario : [];
       return c;
     });
-    var tm = /^\d{2}:\d{2}$/;
-    var events = (Array.isArray(obj.events) ? obj.events : []).filter(function (ev) { return ev && re.test(ev.date || ''); }).map(function (ev) {
-      var r = ev.rep && typeof ev.rep === 'object' ? ev.rep : {};
-      ev.id = ev.id || uid(); ev.type = ev.type === 'rem' ? 'rem' : 'app'; ev.title = String(ev.title || ''); ev.clientId = ev.clientId || '';
-      ev.allDay = !!ev.allDay; ev.start = tm.test(ev.start || '') ? ev.start : (ev.allDay ? '' : '09:00'); ev.end = tm.test(ev.end || '') ? ev.end : '';
-      ev.rep = { freq: ['daily', 'weekly', 'monthly', 'yearly'].indexOf(r.freq) >= 0 ? r.freq : 'none', interval: Math.max(1, Math.min(30, Number(r.interval) || 1)), days: (Array.isArray(r.days) ? r.days : []).filter(function (n) { return n >= 0 && n <= 6; }), until: re.test(r.until || '') ? r.until : '' };
-      ev.reminders = (Array.isArray(ev.reminders) ? ev.reminders : []).map(Number).filter(function (n) { return n >= 0; });
-      ev.ex = (Array.isArray(ev.ex) ? ev.ex : []).filter(function (x) { return re.test(x); });
-      ev.doneDates = (Array.isArray(ev.doneDates) ? ev.doneDates : []).filter(function (x) { return re.test(x); });
-      ev.location = String(ev.location || ''); ev.notes = String(ev.notes || ''); ev.color = /^#[0-9A-Fa-f]{6}$/.test(ev.color || '') ? ev.color : '#D94F00';
-      return ev;
-    });
-    return { clients: clients, meta: obj.meta || {}, events: events };
+    return { clients: clients, meta: obj.meta || {} };
   }
 
   document.addEventListener('click', function (e) {
@@ -445,25 +408,23 @@
       var p = c && getPlan(c, pid); if (!p) return;
       p.paid = p.paid || {}; p.paid[t.getAttribute('data-ym')] = !isPaid(p, t.getAttribute('data-ym'));
       save(); render();
-    } else if (act === 'mprev') { S.viewYM = addM(S.viewYM || curYM(), -1); S.calSel = null; render(); }
-    else if (act === 'mnext') { S.viewYM = addM(S.viewYM || curYM(), 1); S.calSel = null; render(); }
-    else if (act === 'mnow') { S.viewYM = null; S.calSel = null; render(); }
-    else if (act === 'caltoggle') { S.cal = !S.cal; S.calAnim = S.cal; if (!S.cal) S.calSel = null; render(); }
-    else if (act === 'calday') { var dd = t.getAttribute('data-d'); S.calSel = S.calSel === dd ? null : dd; render(); }
+    } else if (act === 'mprev') { S.viewYM = addM(S.viewYM || curYM(), -1); render(); }
+    else if (act === 'mnext') { S.viewYM = addM(S.viewYM || curYM(), 1); render(); }
+    else if (act === 'mnow') { S.viewYM = null; render(); }
     else if (act === 'open') { location.hash = '#cliente/' + cid + '/abb'; }
     else if (act === 'renew') {
       var ps = plansOf(c), lp = ps[ps.length - 1];
       var start = addDaysISO(planEnd(lp), 1); if (start < todayISO()) start = todayISO();
-      S.form = { type: 'plan', planId: null, defaults: { months: lp.months, amount: lp.amount, startDate: start } };
+      S.form = { type: 'plan', planId: null, defaults: { months: lp.months, amount: lp.amount, startDate: start, dueDay: lp.dueDay } };
       var target = '#cliente/' + cid + '/abb';
       if (location.hash !== target) { S.keepForm = true; location.hash = target; } else render();
     }
     else if (act === 'newclient') { S.form = { type: 'client', id: null }; render(); }
     else if (act === 'editclient') { S.form = { type: 'client', id: cid }; render(); }
-    else if (act === 'delclient') { db.clients = db.clients.filter(function (x) { return x.id !== cid; }); db.events.forEach(function (ev) { if (ev.clientId === cid) ev.clientId = ''; }); save(); location.hash = '#clienti'; render(); toast('Cliente eliminato'); }
+    else if (act === 'delclient') { db.clients = db.clients.filter(function (x) { return x.id !== cid; }); save(); location.hash = '#clienti'; render(); toast('Cliente eliminato'); }
     else if (act === 'newplan') {
       var pl = plansOf(c), last = pl[pl.length - 1], d = {};
-      if (last) { d.months = last.months; d.amount = last.amount; var s2 = addDaysISO(planEnd(last), 1); d.startDate = s2 < todayISO() ? todayISO() : s2; }
+      if (last) { d.months = last.months; d.amount = last.amount; d.dueDay = last.dueDay; var s2 = addDaysISO(planEnd(last), 1); d.startDate = s2 < todayISO() ? todayISO() : s2; }
       S.form = { type: 'plan', planId: null, defaults: d }; render();
     }
     else if (act === 'editplan') { S.form = { type: 'plan', planId: pid }; render(); }
@@ -474,7 +435,7 @@
     else if (act === 'copybackup') copyBackup();
     else if (act === 'importok') { db = S.importData; S.importData = null; save(); render(); toast('Dati ripristinati'); }
     else if (act === 'importno') { S.importData = null; render(); }
-    else if (act === 'wipe') { db = { clients: [], meta: {}, events: [] }; save(); render(); toast('Tutti i dati sono stati cancellati'); }
+    else if (act === 'wipe') { db = { clients: [], meta: {} }; save(); render(); toast('Tutti i dati sono stati cancellati'); }
   });
 
   document.addEventListener('submit', function (e) {
@@ -492,9 +453,10 @@
     } else if (kind === 'plan') {
       var c = getClient(r.id); if (!c) return;
       var pe = f.elements; var months = Math.max(1, Math.min(36, Math.round(Number(pe.namedItem('months').value)))), amount = Number(pe.namedItem('amount').value), start = pe.namedItem('startDate').value;
+      var dd = Math.round(Number(pe.namedItem('dueDay').value)); dd = dd >= 1 && dd <= 31 ? dd : '';
       if (!start || !(amount >= 0)) return;
-      if (S.form && S.form.planId) { var p = getPlan(c, S.form.planId); p.months = months; p.amount = amount; p.startDate = start; }
-      else c.plans.push({ id: uid(), months: months, amount: amount, startDate: start, paid: {} });
+      if (S.form && S.form.planId) { var p = getPlan(c, S.form.planId); p.months = months; p.amount = amount; p.startDate = start; p.dueDay = dd; }
+      else c.plans.push({ id: uid(), months: months, amount: amount, startDate: start, dueDay: dd, paid: {} });
       S.form = null; save(); render(); toast('Abbonamento salvato');
     } else if (kind === 'diary') {
       var de = f.elements; var c2 = getClient(r.id); var text = de.namedItem('text').value.trim(); if (!c2 || !text) return;
@@ -548,7 +510,7 @@
   window.PT = {
     db: function () { return db; }, save: save, render: function () { render(); }, toast: toast,
     pd: pd, pad: pad, esc: esc, todayISO: todayISO, addDaysISO: addDaysISO, fmtD: fmtD, addM: addM, daysIn: daysIn, MESI: MESI,
-    getClient: getClient, getPlan: getPlan, isPaid: isPaid, payRow: payRow, monthPays: monthPays, dueISO: dueISO
+    getClient: getClient, getPlan: getPlan, isPaid: isPaid, payRow: payRow, monthPays: monthPays, dueISO: dueISO, payState: payState, STLAB: STLAB
   };
   render();
 })();
