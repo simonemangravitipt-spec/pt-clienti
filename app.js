@@ -97,7 +97,7 @@
   }
 
   /* ================= Stato dell'interfaccia ================= */
-  var S = { viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false };
+  var S = { viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false, cal: false, calSel: null, calAnim: false };
   var CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var viewEl = document.getElementById('view');
   var toastTimer = null;
@@ -121,6 +121,59 @@
       '<span class="amt num">' + eur(x.p.amount) + '</span></li>';
   }
 
+
+  /* ================= Calendario dei pagamenti (la "tenda" sotto il mese) ================= */
+  var GIORNI = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+  function daysIn(ym) { var p = ym.split('-').map(Number); return new Date(p[0], p[1], 0).getDate(); }
+  // Giorno di scadenza della rata = giorno di inizio dell'abbonamento (ridotto se il mese è più corto)
+  function dueISO(p, ym) { var d = Math.min(pd(p.startDate).d, daysIn(ym)); return ym + '-' + pad(d); }
+  function monthPays(ym) {
+    var out = [];
+    db.clients.forEach(function (c) { plansOf(c).forEach(function (p) { if (sched(p).indexOf(ym) >= 0) out.push({ c: c, p: p, ym: ym, due: dueISO(p, ym), paid: isPaid(p, ym) }); }); });
+    out.sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : a.c.name.localeCompare(b.c.name); });
+    return out;
+  }
+  function dayState(list, iso) {
+    var t = todayISO(), unpaid = list.filter(function (x) { return !x.paid; });
+    if (!unpaid.length) return 'ok';
+    return iso < t ? 'late' : 'pend';
+  }
+  function calendarHtml(ym) {
+    var pays = monthPays(ym), by = {}, t = todayISO();
+    pays.forEach(function (x) { (by[x.due] = by[x.due] || []).push(x); });
+    var tot = 0, got = 0, lateAmt = 0, lateN = 0, nextAmt = 0;
+    pays.forEach(function (x) {
+      tot += x.p.amount;
+      if (x.paid) got += x.p.amount; else if (x.due < t) { lateAmt += x.p.amount; lateN++; } else nextAmt += x.p.amount;
+    });
+    var p0 = ym.split('-').map(Number); var first = new Date(p0[0], p0[1] - 1, 1); var off = (first.getDay() + 6) % 7; var n = daysIn(ym);
+    var h = '<div class="curtain' + (S.calAnim ? ' anim' : '') + '" id="curtain" role="region" aria-label="Calendario pagamenti di ' + lab(ym) + '">';
+    h += '<div class="calsum"><div><span class="lab">Incassato</span><b class="num ok">' + eur(got) + '</b></div>' +
+      '<div><span class="lab">Insoluti</span><b class="num ' + (lateAmt ? 'bad' : '') + '">' + eur(lateAmt) + '</b><small class="muted">' + lateN + (lateN === 1 ? ' rata' : ' rate') + '</small></div>' +
+      '<div><span class="lab">Ancora in arrivo</span><b class="num">' + eur(nextAmt) + '</b></div></div>';
+    h += '<div class="calgrid" role="grid">' + GIORNI.map(function (g) { return '<span class="dow" aria-hidden="true">' + g + '</span>'; }).join('');
+    for (var i = 0; i < off; i++) h += '<span class="day blank"></span>';
+    for (var d = 1; d <= n; d++) {
+      var iso = ym + '-' + pad(d), list = by[iso];
+      if (!list) { h += '<span class="day none' + (iso === t ? ' today' : '') + '">' + d + '</span>'; continue; }
+      var st = dayState(list, iso);
+      var names = list.map(function (x) { return x.c.name; }).join(', ');
+      var txt = st === 'ok' ? 'pagato' : st === 'late' ? 'insoluto' : 'da pagare';
+      h += '<button type="button" class="day ' + st + (iso === t ? ' today' : '') + (S.calSel === iso ? ' sel' : '') + '" data-act="calday" data-d="' + iso + '" aria-pressed="' + (S.calSel === iso) + '" aria-label="' + d + ' ' + lab(ym) + ': ' + esc(names) + ', ' + txt + '">' + d + (list.length > 1 ? '<i>' + list.length + '</i>' : '') + '</button>';
+    }
+    h += '</div>';
+    h += '<div class="legend small"><span><i class="sw ok"></i>Pagato</span><span><i class="sw late"></i>Insoluto</span><span><i class="sw pend"></i>Da pagare</span></div>';
+    if (S.calSel && by[S.calSel]) {
+      h += '<div class="selday"><div class="sechead"><h2>' + fmtD(S.calSel) + '</h2><span class="muted small">Tocca il quadrato per segnare il pagamento</span></div><ul class="rows">' +
+        by[S.calSel].map(function (x) { return payRow(x, false); }).join('') + '</ul></div>';
+    } else if (!pays.length) {
+      h += '<p class="muted small calhint">Nessun pagamento previsto a ' + lab(ym) + '.</p>';
+    } else {
+      h += '<p class="muted small calhint">Tocca un giorno colorato per vedere chi deve pagare.</p>';
+    }
+    return h + '</div>';
+  }
+
   function vOggi() {
     var vym = S.viewYM || curYM();
     var rows = [];
@@ -132,8 +185,9 @@
     var late = lateItems(), renew = renewItems();
 
     var h = '<header class="top"><h1>Oggi</h1><div class="monthnav" role="group" aria-label="Mese visualizzato">' +
-      '<button type="button" data-act="mprev" aria-label="Mese precedente">‹</button><span class="lbl">' + lab(vym) + '</span>' +
+      '<button type="button" data-act="mprev" aria-label="Mese precedente">‹</button><button type="button" class="lblbtn" data-act="caltoggle" aria-expanded="' + S.cal + '" aria-controls="curtain">' + lab(vym) + ' <span class="car" aria-hidden="true">' + (S.cal ? '▴' : '▾') + '</span></button>' +
       '<button type="button" data-act="mnext" aria-label="Mese successivo">›</button></div></header>';
+    if (S.cal) { h += calendarHtml(vym); S.calAnim = false; }
     if (vym !== curYM()) h += '<div><button type="button" class="btn sm" data-act="mnow">Torna a ' + lab(curYM()) + '</button></div>';
 
     if (db.clients.length && (!db.meta.lastBackup || daysSince(db.meta.lastBackup) > 30)) {
@@ -374,9 +428,11 @@
       var p = c && getPlan(c, pid); if (!p) return;
       p.paid = p.paid || {}; p.paid[t.getAttribute('data-ym')] = !isPaid(p, t.getAttribute('data-ym'));
       save(); render();
-    } else if (act === 'mprev') { S.viewYM = addM(S.viewYM || curYM(), -1); render(); }
-    else if (act === 'mnext') { S.viewYM = addM(S.viewYM || curYM(), 1); render(); }
-    else if (act === 'mnow') { S.viewYM = null; render(); }
+    } else if (act === 'mprev') { S.viewYM = addM(S.viewYM || curYM(), -1); S.calSel = null; render(); }
+    else if (act === 'mnext') { S.viewYM = addM(S.viewYM || curYM(), 1); S.calSel = null; render(); }
+    else if (act === 'mnow') { S.viewYM = null; S.calSel = null; render(); }
+    else if (act === 'caltoggle') { S.cal = !S.cal; S.calAnim = S.cal; if (!S.cal) S.calSel = null; render(); }
+    else if (act === 'calday') { var dd = t.getAttribute('data-d'); S.calSel = S.calSel === dd ? null : dd; render(); }
     else if (act === 'open') { location.hash = '#cliente/' + cid + '/abb'; }
     else if (act === 'renew') {
       var ps = plansOf(c), lp = ps[ps.length - 1];

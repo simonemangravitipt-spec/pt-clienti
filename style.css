@@ -43,6 +43,36 @@ a { color: inherit; }
 .monthnav button { border: 0; background: transparent; width: 38px; height: 38px; border-radius: 8px; font-size: 1.15rem; }
 .monthnav .lbl { min-width: 10ch; text-align: center; font-weight: 600; text-transform: capitalize; }
 
+.monthnav .lblbtn { width: auto; min-width: 11ch; padding: 0 10px; font-weight: 600; text-transform: capitalize; color: var(--fg); }
+.monthnav .lblbtn .car { color: var(--accent); font-size: 0.8em; }
+.curtain { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 14px; transform-origin: top; }
+.curtain.anim { animation: drop .22s ease-out; }
+@keyframes drop { from { opacity: 0; transform: translateY(-10px) scaleY(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .curtain.anim { animation: none; } }
+.calsum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.calsum > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.calsum b { font-size: 1.05rem; }
+.calsum b.ok { color: var(--ok); }
+.calsum b.bad { color: var(--late); }
+.calgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.calgrid .dow { text-align: center; font-size: 0.72rem; color: var(--muted); font-weight: 700; padding-bottom: 2px; }
+.calgrid .day { position: relative; aspect-ratio: 1 / 1; display: grid; place-items: center; border-radius: 10px; font-size: 0.95rem; font-family: var(--font-num); border: 1.5px solid transparent; background: transparent; padding: 0; color: var(--fg); }
+.calgrid .day.none { color: var(--muted); }
+.calgrid .day.blank { visibility: hidden; }
+.calgrid .day.today { box-shadow: inset 0 0 0 2px var(--fg); }
+.calgrid button.day { font-weight: 700; cursor: pointer; }
+.calgrid .day.ok { background: var(--ok); color: #0B0B0B; }
+.calgrid .day.late { background: var(--late); color: #0B0B0B; }
+.calgrid .day.pend { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.calgrid .day.sel { outline: 2px solid var(--fg); outline-offset: 2px; }
+.calgrid .day i { position: absolute; top: 2px; right: 4px; font-style: normal; font-size: 0.62rem; font-weight: 700; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 12px; height: 12px; border-radius: 4px; display: inline-block; border: 1.5px solid transparent; }
+.legend .sw.ok { background: var(--ok); } .legend .sw.late { background: var(--late); } .legend .sw.pend { border-color: var(--accent); background: var(--accent-soft); }
+.selday { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.calhint { margin: 0; text-align: center; }
+
 .summary { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
 .sumrow { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: baseline; }
 .big { font-size: 1.8rem; font-weight: 600; line-height: 1; }
