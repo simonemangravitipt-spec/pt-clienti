@@ -202,3 +202,8 @@ body.noscroll { overflow: hidden; }
 .dact { display: flex; flex-direction: column; gap: 8px; }
 [hidden] { display: none !important; }
 input[type=checkbox] { accent-color: var(--accent-strong); }
+
+/* ===== Nota del cliente sulle righe dei pagamenti ===== */
+.row .who .pnote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.74rem; line-height: 1.3; color: var(--accent); font-style: italic; margin-top: 3px; cursor: pointer; overflow-wrap: anywhere; }
+.row .who .pnote.open { -webkit-line-clamp: unset; }
+.agenda { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; }

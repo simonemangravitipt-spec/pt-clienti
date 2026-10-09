@@ -136,11 +136,16 @@
   }
 
   /* ================= Schermata: Incassi ================= */
+  // Nota del cliente (es. "Pack 99, un solo mese"): piccola, su due righe al massimo; toccandola si legge tutta
+  function noteHtml(c) {
+    var n = String(c.notes || '').replace(/\s+/g, ' ').trim();
+    return n ? '<span class="pnote" role="button" tabindex="0" aria-expanded="false" data-act="notetoggle" title="Tocca per leggere tutta la nota">' + esc(n) + '</span>' : '';
+  }
   function payRow(x, showMonth) {
     var idx = sched(x.p).indexOf(x.ym) + 1, paid = isPaid(x.p, x.ym), st = payState(x.p, x.ym), due = fmtD(dueISO(x.p, x.ym)).slice(0, 5);
     return '<li class="row' + (paid ? ' paid' : '') + (st === 'late' ? ' overdue' : '') + '">' +
       '<button type="button" class="chk" data-act="pay" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-pressed="' + paid + '" aria-label="Pagato: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' + CHECK + '</button>' +
-      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span></div>' +
+      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span>' + noteHtml(x.c) + '</div>' +
       '<span class="amt num">' + eur(x.p.amount) + '</span></li>';
   }
 
@@ -404,6 +409,7 @@
     if (needsArm) { var key = act + ':' + (pid || t.getAttribute('data-e') || cid || ''); if (S.armed !== key) { S.armed = key; render(); return; } S.armed = null; }
     else if (S.armed) S.armed = null;
 
+    if (act === 'notetoggle') { var op = t.classList.toggle('open'); t.setAttribute('aria-expanded', op); return; }
     if (act === 'pay') {
       var p = c && getPlan(c, pid); if (!p) return;
       p.paid = p.paid || {}; p.paid[t.getAttribute('data-ym')] = !isPaid(p, t.getAttribute('data-ym'));
@@ -494,7 +500,7 @@
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && e.target.matches && e.target.matches('li.row.link[data-act]')) e.target.click();
+    if (e.key === 'Enter' && e.target.matches && e.target.matches('li.row.link[data-act], .pnote[data-act]')) e.target.click();
   });
 
   window.addEventListener('hashchange', function () {

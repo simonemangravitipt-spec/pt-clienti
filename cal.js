@@ -9,7 +9,7 @@
   var GG = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
   var GGL = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
   var WL = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
-  var VIEWS = [['day', 'Giorno'], ['week', 'Settimana'], ['month', 'Mese'], ['year', 'Anno']];
+  var VIEWS = [['day', 'Giorno'], ['week', 'Settimana'], ['month', 'Mese'], ['year', 'Anno'], ['agenda', 'Programma']];
   var PREF = 'ptapp.cal';
   var C = { view: 'month', date: null, sel: null, drawer: false, drawerAnim: false, mini: null, scrollReq: true };
   var cache = {};
@@ -134,6 +134,19 @@
     return h;
   }
 
+  /* ---------- programma: tutte le rate del mese in ordine di scadenza ---------- */
+  function agendaView() {
+    var ym = ymOf(C.date), list = P().monthPays(ym), t = today(), by = {}, order = [];
+    list.forEach(function (x) { if (!by[x.due]) { by[x.due] = []; order.push(x.due); } by[x.due].push(x); });
+    var h = monthSum(ym) + '<div class="agenda">';
+    if (!list.length) h += '<div class="empty" style="margin:14px 16px 0">Nessuna rata in scadenza a ' + P().MESI[pd(ym + '-01').m - 1] + '.</div>';
+    order.forEach(function (d) {
+      var l = by[d];
+      h += '<section class="daysec"><div class="sechead"><h2 class="' + (d === t ? 'tod' : '') + '">' + dayShort(d) + (d === t ? ' · oggi' : '') + '</h2><span class="muted small">' + summaryText(l) + '</span></div><ul class="rows">' + rows(l) + '</ul></section>';
+    });
+    return h + legend() + '</div>';
+  }
+
   /* ---------- anno ---------- */
   var DCLS = { late: ' dl', pend: ' dp', ok: ' dk', '': '' };
   function yearView() {
@@ -181,6 +194,7 @@
     if (C.view === 'day') return dayView();
     if (C.view === 'week') return weekView();
     if (C.view === 'year') return yearView();
+    if (C.view === 'agenda') return agendaView();
     return monthView();
   }
   function view() {
@@ -200,7 +214,7 @@
   function step(dir) {
     if (C.view === 'day') C.date = addD(C.date, dir);
     else if (C.view === 'week') C.date = addD(C.date, 7 * dir);
-    else if (C.view === 'month') C.date = shiftMonth(C.date, dir);
+    else if (C.view === 'month' || C.view === 'agenda') C.date = shiftMonth(C.date, dir);
     else C.date = shiftMonth(C.date, 12 * dir);
     C.sel = C.date;
   }

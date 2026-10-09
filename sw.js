@@ -1,6 +1,6 @@
 // Service worker: salva i file dell'app sul telefono così si apre anche senza internet.
 // Con internet scarica sempre la versione più recente; senza internet usa quella salvata.
-var VERSION = 'ptapp-v7';
+var VERSION = 'ptapp-v8';
 var FILES = ['./', './index.html', './style.css', './app.js', './cal.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'];
 
