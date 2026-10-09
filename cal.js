@@ -88,7 +88,7 @@
   }
   function monthSum(ym) {
     var l = P().monthPays(ym), n = count(l), amt = { pend: 0, late: 0, ok: 0 };
-    l.forEach(function (x) { amt[stOf(x)] += x.p.amount; });
+    l.forEach(function (x) { amt[stOf(x)] += P().amountDue(x.p, x.ym); });
     function cell(st, lab) { return '<div class="ms"><span class="lab">' + dot(st) + lab + '</span><b class="num">' + fmtE(amt[st]) + '</b><small class="muted">' + n[st] + (n[st] === 1 ? ' rata' : ' rate') + '</small></div>'; }
     return '<div class="msum">' + cell('ok', 'Incassato') + cell('late', 'Insoluti') + cell('pend', 'Da incassare') + '</div>';
   }

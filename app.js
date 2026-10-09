@@ -99,7 +99,7 @@
   }
 
   /* ================= Stato dell'interfaccia ================= */
-  var S = { viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false };
+  var S = { extra: null, viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false };
   var CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var viewEl = document.getElementById('view');
   var toastTimer = null;
@@ -137,23 +137,28 @@
 
   /* ================= Schermata: Incassi ================= */
   // Nota del cliente (es. "Pack 99, un solo mese"): piccola, su due righe al massimo; toccandola si legge tutta
+  function extraOf(p, ym) { var e = p.extra && p.extra[ym]; return e && Number(e.amt) ? e : null; }
+  function amountDue(p, ym) { var e = extraOf(p, ym); return Math.max(0, p.amount + (e ? Number(e.amt) : 0)); }
+  function sgn(n) { return (n > 0 ? '+' : '−') + eur(Math.abs(n)); }
   function noteHtml(c) {
     var n = String(c.notes || '').replace(/\s+/g, ' ').trim();
     return n ? '<span class="pnote" role="button" tabindex="0" aria-expanded="false" data-act="notetoggle" title="Tocca per leggere tutta la nota">' + esc(n) + '</span>' : '';
   }
   function payRow(x, showMonth) {
-    var idx = sched(x.p).indexOf(x.ym) + 1, paid = isPaid(x.p, x.ym), st = payState(x.p, x.ym), due = fmtD(dueISO(x.p, x.ym)).slice(0, 5);
+    var idx = sched(x.p).indexOf(x.ym) + 1, paid = isPaid(x.p, x.ym), st = payState(x.p, x.ym), due = fmtD(dueISO(x.p, x.ym)).slice(0, 5), ex = extraOf(x.p, x.ym);
     return '<li class="row' + (paid ? ' paid' : '') + (st === 'late' ? ' overdue' : '') + '">' +
       '<button type="button" class="chk" data-act="pay" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-pressed="' + paid + '" aria-label="Pagato: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' + CHECK + '</button>' +
-      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span>' + noteHtml(x.c) + '</div>' +
-      '<span class="amt num">' + eur(x.p.amount) + '</span></li>';
+      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span>' + (ex && ex.note ? '<span class="pextra">Extra: ' + esc(ex.note) + '</span>' : '') + noteHtml(x.c) + '</div>' +
+      '<button type="button" class="amtcol" data-act="extra" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-label="Importo e extra: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' +
+      '<span class="amt num">' + eur(amountDue(x.p, x.ym)) + '</span>' +
+      (ex ? '<span class="xtag">' + sgn(Number(ex.amt)) + ' extra</span>' : '<span class="xtag add">＋ extra</span>') + '</button></li>';
   }
 
   function vOggi() {
     var vym = S.viewYM || curYM(), t = todayISO();
     var rows = monthPays(vym);
     var expected = 0, got = 0, missing = 0;
-    rows.forEach(function (x) { expected += x.p.amount; if (x.paid) got += x.p.amount; else missing++; });
+    rows.forEach(function (x) { var ad = amountDue(x.p, x.ym); expected += ad; if (x.paid) got += ad; else missing++; });
     var pct = expected ? Math.round(got / expected * 100) : 0;
     var late = lateItems(), renew = renewItems();
     var todo = rows.filter(function (x) { return !x.paid && x.due >= t; });
@@ -248,10 +253,11 @@
       var cls = 'chip'; if (isPaid(p, ym)) cls += ' paid'; else if (isLate(p, ym)) cls += ' late'; if (ym === curYM()) cls += ' now';
       return '<button type="button" class="' + cls + '" data-act="pay" data-c="' + c.id + '" data-p="' + p.id + '" data-ym="' + ym + '" aria-pressed="' + isPaid(p, ym) + '" aria-label="' + lab(ym) + ': ' + STLAB[payState(p, ym)] + '">' + labShort(ym) + '</button>';
     }).join('');
-    return '<article class="card"><div class="head"><div><b class="num">' + eur(p.amount) + ' × ' + p.months + ' mesi = ' + eur(p.amount * p.months) + '</b>' +
+    var tot = 0, inc = 0, nx = 0; s.forEach(function (ym) { var d = amountDue(p, ym); tot += d; if (isPaid(p, ym)) inc += d; if (extraOf(p, ym)) nx++; });
+    return '<article class="card"><div class="head"><div><b class="num">' + eur(p.amount) + ' × ' + p.months + ' mesi = ' + eur(tot) + '</b>' + (nx ? '<div class="muted small">incluso extra su ' + nx + (nx === 1 ? ' mese' : ' mesi') + '</div>' : '') +
       '<div class="muted small num">Dal ' + fmtD(p.startDate) + ' al ' + fmtD(planEnd(p)) + '</div><div class="muted small">Rata in scadenza il giorno ' + (Number(p.dueDay) >= 1 ? p.dueDay : pd(p.startDate).d) + ' di ogni mese</div></div>' +
       (n === p.months ? '<span class="badge ok">Saldato</span>' : '') + '</div>' +
-      '<div class="muted small">Pagati ' + n + ' di ' + p.months + ' · incassato ' + eur(n * p.amount) + '</div><div class="chips">' + chips + '</div>' +
+      '<div class="muted small">Pagati ' + n + ' di ' + p.months + ' · incassato ' + eur(inc) + '</div><div class="chips">' + chips + '</div>' +
       '<div class="actions"><button type="button" class="btn sm" data-act="editplan" data-c="' + c.id + '" data-p="' + p.id + '">Modifica</button>' +
       '<button type="button" class="btn sm danger' + (arm ? ' armed' : '') + '" data-arm="1" data-act="delplan" data-c="' + c.id + '" data-p="' + p.id + '">' + (arm ? 'Conferma eliminazione' : 'Elimina') + '</button></div></article>';
   }
@@ -361,7 +367,29 @@
     updPlanPreview();
     window.scrollTo(0, y);
     if (r.name === 'calendario' && window.PTCal) window.PTCal.after(); else document.body.classList.remove('noscroll');
+    renderExtra();
   }
+  function renderExtra() {
+    var h = document.getElementById('xhost');
+    if (!h) { h = document.createElement('div'); h.id = 'xhost'; document.body.appendChild(h); }
+    var x = S.extra, c = x && getClient(x.c), p = c && getPlan(c, x.p);
+    if (!p) { S.extra = null; x = null; }
+    if (!x) { h.innerHTML = ''; return; }
+    var e = extraOf(p, x.ym);
+    h.innerHTML = '<div class="sbk" data-act="extraclose"></div><form class="sheet" data-form="extra" role="dialog" aria-modal="true" aria-label="Extra sulla rata"><div class="sbody">' +
+      '<h2 style="margin:0">Extra sulla rata</h2>' +
+      '<div class="muted">' + esc(c.name) + ' · ' + lab(x.ym) + '<br>Rata base <b class="num">' + eur(p.amount) + '</b></div>' +
+      '<label class="l">Importo in più (€) — metti il segno − per uno sconto<input id="xamt" name="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 50" value="' + (e ? esc(String(e.amt).replace('.', ',')) : '') + '"></label>' +
+      '<label class="l">Motivo (facoltativo)<input name="note" type="text" maxlength="80" placeholder="es. 2 sedute in più" value="' + (e ? esc(e.note || '') : '') + '"></label>' +
+      '<div class="xtot">Totale da incassare: <b class="num" id="xtot">' + eur(amountDue(p, x.ym)) + '</b></div>' +
+      '<div class="actions"><button type="submit" class="btn primary">Salva</button>' +
+      (e ? '<button type="button" class="btn danger" data-act="extradel">Togli extra</button>' : '') +
+      '<button type="button" class="btn" data-act="extraclose">Annulla</button></div></div></form>';
+    document.body.classList.add('noscroll');
+    var i = document.getElementById('xamt'); if (i && !x.focused) { x.focused = true; setTimeout(function () { i.focus(); }, 30); }
+  }
+  function closeExtra() { S.extra = null; render(); }
+  function parseAmt(v) { var n = Number(String(v).replace(/\s/g, '').replace('−', '-').replace(',', '.')); return isFinite(n) ? n : NaN; }
   function updPlanPreview() {
     var f = viewEl.querySelector('form[data-form="plan"]'); var box = document.getElementById('planpreview');
     if (!f || !box) return;
@@ -387,13 +415,18 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { toast('Copia non riuscita: usa “Scarica backup”'); });
     else toast('Copia non disponibile: usa “Scarica backup”');
   }
+  function cleanExtra(o) {
+    var out = {}; if (!o || typeof o !== 'object') return out;
+    Object.keys(o).forEach(function (k) { var e = o[k], n = e && Number(e.amt); if (/^\d{4}-\d{2}$/.test(k) && n && isFinite(n)) out[k] = { amt: n, note: String(e.note || '').slice(0, 80) }; });
+    return out;
+  }
   function sanitize(obj) {
     if (!obj || !Array.isArray(obj.clients)) return null;
     var re = /^\d{4}-\d{2}-\d{2}$/;
     var clients = obj.clients.filter(function (c) { return c && typeof c.name === 'string' && c.name; }).map(function (c) {
       c.id = c.id || uid();
       c.plans = (Array.isArray(c.plans) ? c.plans : []).filter(function (p) { return p && re.test(p.startDate || '') && Number(p.months) > 0; })
-        .map(function (p) { p.id = p.id || uid(); p.months = Number(p.months); p.amount = Number(p.amount) || 0; p.paid = p.paid || {}; p.dueDay = Number(p.dueDay) >= 1 && Number(p.dueDay) <= 31 ? Math.round(Number(p.dueDay)) : ''; return p; });
+        .map(function (p) { p.id = p.id || uid(); p.months = Number(p.months); p.amount = Number(p.amount) || 0; p.paid = p.paid || {}; p.extra = cleanExtra(p.extra); p.dueDay = Number(p.dueDay) >= 1 && Number(p.dueDay) <= 31 ? Math.round(Number(p.dueDay)) : ''; return p; });
       c.anamnesi = c.anamnesi || {}; c.diario = Array.isArray(c.diario) ? c.diario : [];
       return c;
     });
@@ -409,6 +442,9 @@
     if (needsArm) { var key = act + ':' + (pid || t.getAttribute('data-e') || cid || ''); if (S.armed !== key) { S.armed = key; render(); return; } S.armed = null; }
     else if (S.armed) S.armed = null;
 
+    if (act === 'extra') { if (c && getPlan(c, pid)) { S.extra = { c: cid, p: pid, ym: t.getAttribute('data-ym') }; render(); } return; }
+    if (act === 'extraclose') { closeExtra(); return; }
+    if (act === 'extradel') { var xc = getClient(S.extra.c), xp = xc && getPlan(xc, S.extra.p); if (xp && xp.extra) { delete xp.extra[S.extra.ym]; save(); toast('Extra tolto'); } closeExtra(); return; }
     if (act === 'notetoggle') { var op = t.classList.toggle('open'); t.setAttribute('aria-expanded', op); return; }
     if (act === 'pay') {
       var p = c && getPlan(c, pid); if (!p) return;
@@ -448,6 +484,14 @@
     var f = e.target; var kind = f.getAttribute('data-form'); if (!kind) return;
     e.preventDefault();
     var r = route();
+    if (kind === 'extra') {
+      var xc = S.extra && getClient(S.extra.c), xp = xc && getPlan(xc, S.extra.p); if (!xp) return;
+      var raw = f.elements.namedItem('amt').value.trim(), v = raw === '' ? 0 : parseAmt(raw);
+      if (isNaN(v)) { toast('Importo non valido'); return; }
+      xp.extra = xp.extra || {};
+      if (v === 0) delete xp.extra[S.extra.ym]; else xp.extra[S.extra.ym] = { amt: Math.round(v * 100) / 100, note: f.elements.namedItem('note').value.trim() };
+      save(); toast(v === 0 ? 'Extra tolto' : 'Extra salvato'); closeExtra(); return;
+    }
     if (kind === 'client') {
       var el = f.elements; var name = el.namedItem('name').value.trim(); if (!name) return;
       var data = { name: name, phone: el.namedItem('phone').value.trim(), email: el.namedItem('email').value.trim(), birth: el.namedItem('birth').value, goal: el.namedItem('goal').value.trim(), notes: el.namedItem('notes').value.trim() };
@@ -473,6 +517,7 @@
   document.addEventListener('input', function (e) {
     var t = e.target;
     if (t.id === 'q') { S.search = t.value; var l = document.getElementById('clist'); if (l) l.innerHTML = clientRows(); return; }
+    if (t.id === 'xamt' && S.extra) { var xc2 = getClient(S.extra.c), xp2 = xc2 && getPlan(xc2, S.extra.p), v = parseAmt(t.value || 0), tt = document.getElementById('xtot'); if (xp2 && tt) tt.textContent = eur(Math.max(0, xp2.amount + (isNaN(v) ? 0 : v))); return; }
     if (t.closest && t.closest('form[data-form="plan"]')) { updPlanPreview(); return; }
     var key = t.getAttribute && t.getAttribute('data-an');
     if (key) {
@@ -500,12 +545,13 @@
   });
 
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && S.extra) { closeExtra(); return; }
     if (e.key === 'Enter' && e.target.matches && e.target.matches('li.row.link[data-act], .pnote[data-act]')) e.target.click();
   });
 
   window.addEventListener('hashchange', function () {
     if (S.keepForm) S.keepForm = false; else S.form = null;
-    S.armed = null; S.importData = null; render(true);
+    S.armed = null; S.importData = null; S.extra = null; render(true);
   });
 
   // Chiede al browser di non cancellare i dati in caso di poco spazio
@@ -516,7 +562,7 @@
   window.PT = {
     db: function () { return db; }, save: save, render: function () { render(); }, toast: toast,
     pd: pd, pad: pad, esc: esc, todayISO: todayISO, addDaysISO: addDaysISO, fmtD: fmtD, addM: addM, daysIn: daysIn, MESI: MESI,
-    getClient: getClient, getPlan: getPlan, isPaid: isPaid, payRow: payRow, monthPays: monthPays, dueISO: dueISO, payState: payState, STLAB: STLAB
+    getClient: getClient, getPlan: getPlan, amountDue: amountDue, extraOf: extraOf, isPaid: isPaid, payRow: payRow, monthPays: monthPays, dueISO: dueISO, payState: payState, STLAB: STLAB
   };
   render();
 })();
