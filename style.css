@@ -219,3 +219,5 @@ input[type=checkbox] { accent-color: var(--accent-strong); }
 .xtag.add{color:var(--muted);font-weight:500}
 .pextra{display:block;font-size:.78rem;color:var(--accent)}
 .xtot{font-size:1.05rem}
+.seg{display:flex;gap:6px}.seg button{flex:1;min-height:44px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-weight:600}.seg button.on{background:var(--accent-strong);border-color:var(--accent);color:#fff}
+.sechead{list-style:none;margin:14px 2px 2px;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}

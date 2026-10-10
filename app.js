@@ -77,6 +77,7 @@
   function renewItems() {
     var out = [], now = curYM(), nxt = addM(now, 1), today = todayISO();
     db.clients.forEach(function (c) {
+      if (c.temp) return;
       var ps = plansOf(c); if (!ps.length) return;
       var lp = ps[ps.length - 1]; var s = sched(lp); var last = s[s.length - 1];
       var ended = planEnd(lp) < today;
@@ -92,6 +93,7 @@
     ps.forEach(function (p) { sched(p).forEach(function (ym) { if (isLate(p, ym)) late++; }); });
     if (late) return { t: late === 1 ? '1 rata scaduta' : late + ' rate scadute', cls: 'late' };
     var lp = ps[ps.length - 1]; var s = sched(lp); var last = s[s.length - 1];
+    if (c.temp) return { t: 'Temporaneo', cls: '' };
     if (planEnd(lp) < todayISO()) return { t: 'Da rinnovare', cls: 'warn' };
     if (last === curYM() || last === addM(curYM(), 1)) return { t: 'In scadenza', cls: 'warn' };
     if (lp.startDate > todayISO()) return { t: 'Parte il ' + fmtD(lp.startDate), cls: 'acc' };
@@ -148,10 +150,10 @@
     var idx = sched(x.p).indexOf(x.ym) + 1, paid = isPaid(x.p, x.ym), st = payState(x.p, x.ym), due = fmtD(dueISO(x.p, x.ym)).slice(0, 5), ex = extraOf(x.p, x.ym);
     return '<li class="row' + (paid ? ' paid' : '') + (st === 'late' ? ' overdue' : '') + '">' +
       '<button type="button" class="chk" data-act="pay" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-pressed="' + paid + '" aria-label="Pagato: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' + CHECK + '</button>' +
-      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span>' + (ex && ex.note ? '<span class="pextra">Extra: ' + esc(ex.note) + '</span>' : '') + noteHtml(x.c) + '</div>' +
+      '<div class="who"><b><i class="pdot ' + st + '" role="img" aria-label="' + STLAB[st] + '"></i><a href="#cliente/' + x.c.id + '/abb">' + esc(x.c.name) + '</a></b><span>' + (showMonth ? lab(x.ym) + ' · ' : '') + 'scadenza ' + due + ' · rata ' + idx + ' di ' + x.p.months + '</span>' + (ex && ex.note ? '<span class="pextra">' + (Number(ex.amt) < 0 ? 'Sconto' : 'Extra') + ': ' + esc(ex.note) + '</span>' : '') + noteHtml(x.c) + '</div>' +
       '<button type="button" class="amtcol" data-act="extra" data-c="' + x.c.id + '" data-p="' + x.p.id + '" data-ym="' + x.ym + '" aria-label="Importo e extra: ' + esc(x.c.name) + ', ' + lab(x.ym) + '">' +
       '<span class="amt num">' + eur(amountDue(x.p, x.ym)) + '</span>' +
-      (ex ? '<span class="xtag">' + sgn(Number(ex.amt)) + ' extra</span>' : '<span class="xtag add">＋ extra</span>') + '</button></li>';
+      (ex ? '<span class="xtag">' + sgn(Number(ex.amt)) + (Number(ex.amt) < 0 ? ' sconto' : ' extra') + '</span>' : '<span class="xtag add">＋ extra / sconto</span>') + '</button></li>';
   }
 
   function vOggi() {
@@ -210,11 +212,15 @@
     var list = db.clients.filter(function (c) { return !q || (c.name + ' ' + (c.phone || '')).toLowerCase().indexOf(q) >= 0; })
       .sort(function (a, b) { return a.name.localeCompare(b.name); });
     if (!list.length) return '<li class="empty">' + (db.clients.length ? 'Nessun cliente corrisponde alla ricerca.' : 'Nessun cliente ancora. Usa “Nuovo cliente” per inserire il primo.') + '</li>';
-    return list.map(function (c) {
+    var act = list.filter(function (c) { return !c.temp; }), tmp = list.filter(function (c) { return c.temp; });
+    return act.map(clientLi).join('') + (tmp.length ? '<li class="sechead">Temporanei · pagamento singolo (' + tmp.length + ')</li>' + tmp.map(clientLi).join('') : '');
+  }
+  function clientLi(c) {
+    {
       var st = statusOf(c); var ps = plansOf(c); var lp = ps[ps.length - 1];
-      var sub = lp ? fmtD(lp.startDate) + ' → ' + fmtD(planEnd(lp)) + ' · ' + eur(lp.amount) + '/mese' : (c.phone || 'Nessun abbonamento');
+      var sub = lp && c.temp ? lab(sched(lp)[0]) + ' · ' + eur(lp.amount) : lp ? fmtD(lp.startDate) + ' → ' + fmtD(planEnd(lp)) + ' · ' + eur(lp.amount) + '/mese' : (c.phone || 'Nessun abbonamento');
       return '<li class="row link" role="link" tabindex="0" data-act="open" data-c="' + c.id + '"><div class="who"><b>' + esc(c.name) + '</b><span>' + esc(sub) + '</span></div><span class="badge ' + st.cls + '">' + esc(st.t) + '</span></li>';
-    }).join('');
+    }
   }
   function vClienti() {
     if (S.form && S.form.type === 'client' && !S.form.id) return clientForm();
@@ -232,6 +238,7 @@
       '<label class="l">Email<input type="email" name="email" maxlength="80" value="' + esc(c.email) + '"></label>' +
       '<label class="l">Data di nascita<input type="date" name="birth" value="' + esc(c.birth) + '"></label>' +
       '<label class="l">Obiettivo<input type="text" name="goal" maxlength="120" value="' + esc(c.goal) + '"></label>' +
+      '<label class="l check full"><input type="checkbox" name="temp"' + (c.temp ? ' checked' : '') + '> Cliente temporaneo: paga una volta sola. Resta nei pagamenti del mese, ma non compare tra i clienti da rinnovare.</label>' +
       '<label class="l full">Note<textarea name="notes" maxlength="1000">' + esc(c.notes) + '</textarea></label>' +
       '<div class="full formbtns"><button type="submit" class="btn primary">Salva cliente</button><a class="btn" href="' + (c.id ? '#cliente/' + c.id + '/abb' : '#clienti') + '">Annulla</a></div></form>';
   }
@@ -375,11 +382,12 @@
     var x = S.extra, c = x && getClient(x.c), p = c && getPlan(c, x.p);
     if (!p) { S.extra = null; x = null; }
     if (!x) { h.innerHTML = ''; return; }
-    var e = extraOf(p, x.ym);
+    var e = extraOf(p, x.ym); if (!x.mode) x.mode = e && Number(e.amt) < 0 ? '-' : '+';
     h.innerHTML = '<div class="sbk" data-act="extraclose"></div><form class="sheet" data-form="extra" role="dialog" aria-modal="true" aria-label="Extra sulla rata"><div class="sbody">' +
       '<h2 style="margin:0">Extra sulla rata</h2>' +
       '<div class="muted">' + esc(c.name) + ' · ' + lab(x.ym) + '<br>Rata base <b class="num">' + eur(p.amount) + '</b></div>' +
-      '<label class="l">Importo in più (€) — metti il segno − per uno sconto<input id="xamt" name="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 50" value="' + (e ? esc(String(e.amt).replace('.', ',')) : '') + '"></label>' +
+      '<div class="seg" role="group" aria-label="Tipo"><button type="button" class="' + (x.mode === '+' ? 'on' : '') + '" data-act="xmode" data-m="+">＋ Extra</button><button type="button" class="' + (x.mode === '-' ? 'on' : '') + '" data-act="xmode" data-m="-">− Sconto</button></div>' +
+      '<label class="l">Importo (€)<input id="xamt" name="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 50" value="' + (e ? esc(String(Math.abs(Number(e.amt))).replace('.', ',')) : '') + '"></label>' +
       '<label class="l">Motivo (facoltativo)<input name="note" type="text" maxlength="80" placeholder="es. 2 sedute in più" value="' + (e ? esc(e.note || '') : '') + '"></label>' +
       '<div class="xtot">Totale da incassare: <b class="num" id="xtot">' + eur(amountDue(p, x.ym)) + '</b></div>' +
       '<div class="actions"><button type="submit" class="btn primary">Salva</button>' +
@@ -389,6 +397,7 @@
     var i = document.getElementById('xamt'); if (i && !x.focused) { x.focused = true; setTimeout(function () { i.focus(); }, 30); }
   }
   function closeExtra() { S.extra = null; render(); }
+  function signedAmt(raw) { var v = parseAmt(raw === '' ? 0 : raw); if (isNaN(v)) return v; return S.extra && S.extra.mode === '-' ? -Math.abs(v) : v; }
   function parseAmt(v) { var n = Number(String(v).replace(/\s/g, '').replace('−', '-').replace(',', '.')); return isFinite(n) ? n : NaN; }
   function updPlanPreview() {
     var f = viewEl.querySelector('form[data-form="plan"]'); var box = document.getElementById('planpreview');
@@ -427,7 +436,7 @@
       c.id = c.id || uid();
       c.plans = (Array.isArray(c.plans) ? c.plans : []).filter(function (p) { return p && re.test(p.startDate || '') && Number(p.months) > 0; })
         .map(function (p) { p.id = p.id || uid(); p.months = Number(p.months); p.amount = Number(p.amount) || 0; p.paid = p.paid || {}; p.extra = cleanExtra(p.extra); p.dueDay = Number(p.dueDay) >= 1 && Number(p.dueDay) <= 31 ? Math.round(Number(p.dueDay)) : ''; return p; });
-      c.anamnesi = c.anamnesi || {}; c.diario = Array.isArray(c.diario) ? c.diario : [];
+      c.temp = !!c.temp; c.anamnesi = c.anamnesi || {}; c.diario = Array.isArray(c.diario) ? c.diario : [];
       return c;
     });
     return { clients: clients, meta: obj.meta || {} };
@@ -443,6 +452,11 @@
     else if (S.armed) S.armed = null;
 
     if (act === 'extra') { if (c && getPlan(c, pid)) { S.extra = { c: cid, p: pid, ym: t.getAttribute('data-ym') }; render(); } return; }
+    if (act === 'xmode') {
+      S.extra.mode = t.getAttribute('data-m');
+      var bs = t.parentNode.children; for (var bi = 0; bi < bs.length; bi++) bs[bi].classList.toggle('on', bs[bi] === t);
+      var xi = document.getElementById('xamt'); if (xi) xi.dispatchEvent(new Event('input', { bubbles: true })); return;
+    }
     if (act === 'extraclose') { closeExtra(); return; }
     if (act === 'extradel') { var xc = getClient(S.extra.c), xp = xc && getPlan(xc, S.extra.p); if (xp && xp.extra) { delete xp.extra[S.extra.ym]; save(); toast('Extra tolto'); } closeExtra(); return; }
     if (act === 'notetoggle') { var op = t.classList.toggle('open'); t.setAttribute('aria-expanded', op); return; }
@@ -486,7 +500,7 @@
     var r = route();
     if (kind === 'extra') {
       var xc = S.extra && getClient(S.extra.c), xp = xc && getPlan(xc, S.extra.p); if (!xp) return;
-      var raw = f.elements.namedItem('amt').value.trim(), v = raw === '' ? 0 : parseAmt(raw);
+      var raw = f.elements.namedItem('amt').value.trim(), v = signedAmt(raw);
       if (isNaN(v)) { toast('Importo non valido'); return; }
       xp.extra = xp.extra || {};
       if (v === 0) delete xp.extra[S.extra.ym]; else xp.extra[S.extra.ym] = { amt: Math.round(v * 100) / 100, note: f.elements.namedItem('note').value.trim() };
@@ -494,7 +508,7 @@
     }
     if (kind === 'client') {
       var el = f.elements; var name = el.namedItem('name').value.trim(); if (!name) return;
-      var data = { name: name, phone: el.namedItem('phone').value.trim(), email: el.namedItem('email').value.trim(), birth: el.namedItem('birth').value, goal: el.namedItem('goal').value.trim(), notes: el.namedItem('notes').value.trim() };
+      var data = { name: name, phone: el.namedItem('phone').value.trim(), email: el.namedItem('email').value.trim(), birth: el.namedItem('birth').value, goal: el.namedItem('goal').value.trim(), notes: el.namedItem('notes').value.trim(), temp: el.namedItem('temp').checked };
       if (S.form && S.form.id) { Object.assign(getClient(S.form.id), data); S.form = null; save(); render(); toast('Salvato'); }
       else {
         var nc = Object.assign({ id: uid(), plans: [], anamnesi: {}, diario: [], createdAt: todayISO() }, data);
@@ -517,7 +531,7 @@
   document.addEventListener('input', function (e) {
     var t = e.target;
     if (t.id === 'q') { S.search = t.value; var l = document.getElementById('clist'); if (l) l.innerHTML = clientRows(); return; }
-    if (t.id === 'xamt' && S.extra) { var xc2 = getClient(S.extra.c), xp2 = xc2 && getPlan(xc2, S.extra.p), v = parseAmt(t.value || 0), tt = document.getElementById('xtot'); if (xp2 && tt) tt.textContent = eur(Math.max(0, xp2.amount + (isNaN(v) ? 0 : v))); return; }
+    if (t.id === 'xamt' && S.extra) { var xc2 = getClient(S.extra.c), xp2 = xc2 && getPlan(xc2, S.extra.p), v = signedAmt(t.value.trim()), tt = document.getElementById('xtot'); if (xp2 && tt) tt.textContent = eur(Math.max(0, xp2.amount + (isNaN(v) ? 0 : v))); return; }
     if (t.closest && t.closest('form[data-form="plan"]')) { updPlanPreview(); return; }
     var key = t.getAttribute && t.getAttribute('data-an');
     if (key) {
