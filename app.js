@@ -591,7 +591,8 @@
   // Chiede al browser di non cancellare i dati in caso di poco spazio
   if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(function () {}); }
   // Se l'app resta aperta oltre la mezzanotte, ridisegna quando torni sulla pagina
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && !S.form) render(); });
+  var lastDay = todayISO();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !S.form && todayISO() !== lastDay) { lastDay = todayISO(); render(); } });
 
   window.PT = {
     db: function () { return db; }, save: save, render: function () { render(); }, toast: toast,
