@@ -349,7 +349,10 @@
       h += '<div class="card"><b>Il file contiene ' + S.importData.clients.length + ' clienti.</b><div class="muted small">Sostituirà tutti i dati attuali di questa app.</div>' +
         '<div class="actions"><button type="button" class="btn danger armed" data-act="importok">Sostituisci i dati</button><button type="button" class="btn" data-act="importno">Annulla</button></div></div>';
     } else {
-      h += '<section><h2>Ripristina da backup</h2><label class="btn" for="impfile" style="cursor:pointer">Scegli il file di backup</label><input type="file" id="impfile" accept=".json,application/json" hidden></section>';
+      h += '<section><h2>Ripristina da backup</h2><label class="btn" for="impfile" style="cursor:pointer">Scegli il file di backup</label><input type="file" id="impfile" hidden>' +
+        '<p class="muted small" style="margin:0">Se il file non si apre, incolla qui sotto il testo del backup (tasto “Copia backup negli appunti”):</p>' +
+        '<textarea id="imptext" rows="3" placeholder="Incolla qui il backup" style="width:100%"></textarea>' +
+        '<div class="actions"><button type="button" class="btn" data-act="importtext">Ripristina dal testo incollato</button></div></section>';
     }
     h += '<section><h2>Installazione</h2><p class="muted small" style="margin:0">iPhone: apri la pagina in Safari, tocca Condividi e scegli “Aggiungi alla schermata Home”. Android: dal menu di Chrome scegli “Installa app” o “Aggiungi a schermata Home”. Dopo la prima apertura funziona anche senza internet.</p></section>';
     h += '<section><h2>Zona delicata</h2><div><button type="button" class="btn danger' + (wipe ? ' armed' : '') + '" data-arm="1" data-act="wipe">' + (wipe ? 'Conferma: cancella tutto' : 'Cancella tutti i dati') + '</button></div></section>';
@@ -429,6 +432,17 @@
     Object.keys(o).forEach(function (k) { var e = o[k], n = e && Number(e.amt); if (/^\d{4}-\d{2}$/.test(k) && n && isFinite(n)) out[k] = { amt: n, note: String(e.note || '').slice(0, 80) }; });
     return out;
   }
+  function parseBackup(txt) {
+    txt = String(txt || '').replace(/^\uFEFF/, '').trim();
+    var o = null;
+    try { o = JSON.parse(txt); } catch (e) {
+      var i = txt.indexOf('{'), j = txt.lastIndexOf('}');
+      if (i >= 0 && j > i) { try { o = JSON.parse(txt.slice(i, j + 1)); } catch (e2) { o = null; } }
+    }
+    if (o && !Array.isArray(o.clients) && o.db && Array.isArray(o.db.clients)) o = o.db;
+    if (Array.isArray(o)) o = { clients: o };
+    return sanitize(o);
+  }
   function sanitize(obj) {
     if (!obj || !Array.isArray(obj.clients)) return null;
     var re = /^\d{4}-\d{2}-\d{2}$/;
@@ -489,6 +503,10 @@
     else if (act === 'deldiary') { var eid = t.getAttribute('data-e'); c.diario = c.diario.filter(function (x) { return x.id !== eid; }); save(); render(); }
     else if (act === 'export') exportJson();
     else if (act === 'copybackup') copyBackup();
+    else if (act === 'importtext') {
+      var ta = document.getElementById('imptext'), ob = ta && parseBackup(ta.value);
+      if (!ob || !ob.clients.length) toast('Testo non valido: incolla tutto il backup'); else { S.importData = ob; render(); }
+    }
     else if (act === 'importok') { db = S.importData; S.importData = null; save(); render(); toast('Dati ripristinati'); }
     else if (act === 'importno') { S.importData = null; render(); }
     else if (act === 'wipe') { db = { clients: [], meta: {} }; save(); render(); toast('Tutti i dati sono stati cancellati'); }
@@ -549,9 +567,11 @@
     if (t.id === 'impfile' && t.files && t.files[0]) {
       var rd = new FileReader();
       rd.onload = function () {
-        try { var obj = sanitize(JSON.parse(rd.result)); if (!obj) throw new Error('formato'); S.importData = obj; render(); }
-        catch (err) { toast('Il file non è un backup valido'); }
+        var obj = parseBackup(rd.result);
+        if (!obj) toast('Il file non è un backup valido (non contiene clienti)'); else { S.importData = obj; render(); }
+        t.value = '';
       };
+      rd.onerror = function () { toast('Non riesco a leggere il file'); };
       rd.readAsText(t.files[0]);
     } else if (t.getAttribute && t.getAttribute('data-an') && t.type !== 'checkbox') {
       // select e date: già salvati dall'evento input
