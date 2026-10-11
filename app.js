@@ -356,6 +356,7 @@
     }
     h += '<section><h2>Installazione</h2><p class="muted small" style="margin:0">iPhone: apri la pagina in Safari, tocca Condividi e scegli “Aggiungi alla schermata Home”. Android: dal menu di Chrome scegli “Installa app” o “Aggiungi a schermata Home”. Dopo la prima apertura funziona anche senza internet.</p></section>';
     h += '<section><h2>Zona delicata</h2><div><button type="button" class="btn danger' + (wipe ? ' armed' : '') + '" data-arm="1" data-act="wipe">' + (wipe ? 'Conferma: cancella tutto' : 'Cancella tutti i dati') + '</button></div></section>';
+    h += '<p class="muted small" style="text-align:center;margin:18px 0 0">Versione 14</p>';
     return h;
   }
 
