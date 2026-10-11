@@ -101,6 +101,7 @@
   }
 
   /* ================= Stato dell'interfaccia ================= */
+  var APP_VER = 15;
   var S = { extra: null, viewYM: null, search: '', form: null, armed: null, importData: null, keepForm: false };
   var CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var viewEl = document.getElementById('view');
@@ -356,7 +357,7 @@
     }
     h += '<section><h2>Installazione</h2><p class="muted small" style="margin:0">iPhone: apri la pagina in Safari, tocca Condividi e scegli “Aggiungi alla schermata Home”. Android: dal menu di Chrome scegli “Installa app” o “Aggiungi a schermata Home”. Dopo la prima apertura funziona anche senza internet.</p></section>';
     h += '<section><h2>Zona delicata</h2><div><button type="button" class="btn danger' + (wipe ? ' armed' : '') + '" data-arm="1" data-act="wipe">' + (wipe ? 'Conferma: cancella tutto' : 'Cancella tutti i dati') + '</button></div></section>';
-    h += '<p class="muted small" style="text-align:center;margin:18px 0 0">Versione 14</p>';
+    h += '<section style="text-align:center"><p class="muted small" style="margin:18px 0 8px">Versione ' + APP_VER + '</p><button type="button" class="btn sm" data-act="checkupd">' + (S.checking ? 'Controllo…' : 'Cerca aggiornamenti') + '</button></section>';
     return h;
   }
 
@@ -433,6 +434,20 @@
     Object.keys(o).forEach(function (k) { var e = o[k], n = e && Number(e.amt); if (/^\d{4}-\d{2}$/.test(k) && n && isFinite(n)) out[k] = { amt: n, note: String(e.note || '').slice(0, 80) }; });
     return out;
   }
+  function checkUpdate() {
+    if (S.checking) return;
+    S.checking = true; render();
+    var done = function (m) { S.checking = false; render(); if (m) toast(m); };
+    fetch('./sw.js?x=' + Date.now(), { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('http'); return r.text(); }).then(function (t) {
+      var m = /ptapp-v(\d+)/.exec(t); var v = m ? Number(m[1]) : 0;
+      if (!v || v <= APP_VER) { done('Sei già aggiornato (versione ' + APP_VER + ')'); return; }
+      toast('Aggiorno alla versione ' + v + '…');
+      var jobs = [];
+      if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (x) { return x.unregister(); })); }));
+      Promise.all(jobs).catch(function () {}).then(function () { setTimeout(function () { location.reload(); }, 600); });
+    }).catch(function () { done('Nessuna connessione: riprova più tardi'); });
+  }
   function parseBackup(txt) {
     txt = String(txt || '').replace(/^\uFEFF/, '').trim();
     var o = null;
@@ -504,6 +519,7 @@
     else if (act === 'deldiary') { var eid = t.getAttribute('data-e'); c.diario = c.diario.filter(function (x) { return x.id !== eid; }); save(); render(); }
     else if (act === 'export') exportJson();
     else if (act === 'copybackup') copyBackup();
+    else if (act === 'checkupd') { checkUpdate(); return; }
     else if (act === 'importtext') {
       var ta = document.getElementById('imptext'), ob = ta && parseBackup(ta.value);
       if (!ob || !ob.clients.length) toast('Testo non valido: incolla tutto il backup'); else { S.importData = ob; render(); }
